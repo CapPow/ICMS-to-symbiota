@@ -1,14 +1,8 @@
-
 # coding: utf-8
 
 # #### Note:
-# 
 # ICMS uses a field, "Other Numbers" which would be appropriate to list Symbiota catalog Number, # (ie:	"GSMNP00030")
-# 
 # Also vise versa is appropriate for symbiota "otherCatalogNumber" housing the ICMS catalog number (ie: "GRSM  102763")
-
-# In[805]:
-
 
 import pandas as pd
 import numpy as np
@@ -17,10 +11,6 @@ from datetime import datetime # date alignment
 import requests # make request to Taxonomic Resolution service "http://tnrs.iplantcollaborative.org/api.html"
 import json # decode that request
 
-
-# In[806]:
-
-
 df = pd.read_csv('ICMS Data Export Example 042518.csv', dtype = 'str')
 df['Cat #'] = df['Catalog #'].str.replace('GRSM','') # strip out their 'GRSM'
 df['Cat #'] = df['Cat #'].str.strip() # remove the variable quantity of whitespace
@@ -28,11 +18,7 @@ refList = pd.read_csv('GSMNP DBLink 4-27-2018.csv', dtype = 'str')
 refList = refList.rename({'GSMNP (number only)':'Cat #'}, axis = 'columns')
 dfM = pd.merge(refList, df, how='inner') # create a "Merged data frame"
 
-
-# In[807]:
-
-
-#colMapper is structured as: {ICMS:Symbiota}
+# a column mapper, structured as: {ICMS:Symbiota}
 colMapper = {
     'Catalog #':'otherCatalogNumber',
     'SERNEC':'catalogNumber',
@@ -55,16 +41,13 @@ colMapper = {
     'Sci. Name':'scientificName',
     'Sci. Name:Species Authority':'scientificNameAuthorship',
     'Family':'family',
-    'Sex':'sex'}
+    'Sex':'sex',
+    'Description':'preparations' # DWC reccomends seperating by "|"
+    }
 
 dfS = dfM.rename(colMapper, axis = 'columns') # create a Symbiota dataFrame, and rename the fields accordingly.
 
-
 # Field cleaning functions
-
-# In[808]:
-
-
 # clean fields, require a cell value
 def expandStateName(stateStr):
     """expects a state abbreviation, returns an entire state name"""
@@ -102,12 +85,12 @@ def dateConverter(dateObj):
         except ValueError:
             result = cleanedDate
         return result
-    
-# generate combination fields require an entire row (series) of data
+
+# generate combination fields (those relying on multiple columns) require an entire row (series) of data
 def gen_lifeStage(row):
     """expects row data delivered as series returns a generated value"""
     potCols = ['Age/Stage','sex'] # group of potentitally useful column names
-    potCols = [row[x] for x in potCols] # convert column names to values at those columns    
+    potCols = [row[x] for x in potCols] # convert column names to values at those columns
     colList = [x for x in potCols if not pd.isna(x)] # only keep stuff which is not empty
     age = str(row['Age'])
     if (age != np.nan) & (age not in str(row['Age/Stage'])): # if age is also not empty AND not already represented in 'Age/Stage'
@@ -160,9 +143,8 @@ def gen_GPS(row):
         latLon = [float(x.upper().replace('N','').replace('W','')) for x in verbCoord.split('/')]
     elif not pd.isna([row['Lat LongN/W:Latitude Degree'],row['Lat LongN/W:Longitude Degree']]).all(): # if deg / min/ sec used, handle it.
         latList = ['Lat LongN/W:Latitude Degree','Lat LongN/W:Latitude Minutes','Lat LongN/W:Latitude Seconds']
-                                 #"[^0-9^.]"
-        a, b, c = [float(re.sub('[^0-9^.]', '',row[i])) if re.sub('[^0-9^.]', '',str(row[i])).isnumeric() else 0 for i in latList]
-        lat = a + (b / 60) + (c / 3600)     # make the conversions
+        a, b, c = [float(re.sub('[^0-9^.]', '',row[i])) if re.sub('[^0-9^.]', '',str(row[i])).isnumeric() else 0 for i in latList] # extract numbers & "."
+        lat = a + (b / 60) + (c / 3600)     # make the degree to decimal conversions
         av,bv,cv = [row[i] if not pd.isna(row[i]) else '' for i in latList] # Keep the unmodified verbatim values
         lonList = ['Lat LongN/W:Longitude Degree','Lat LongN/W:Longitude Minutes','Lat LongN/W:Longitude Seconds']
         x, y, z = [float(re.sub('[^0-9^.]', '',row[i])) if re.sub('[^0-9^.]', '',str(row[i])).isnumeric() else 0 for i in lonList]
@@ -176,13 +158,9 @@ def gen_GPS(row):
 
     lat, lon = latLon
     if lon > 0: # since these are all national parks, safe to say it'll be in the western Hemisphere
-        lon = -lon
+        lon = -lon # therefore, any posative longitudes are typos.
     result = (lat,lon,verbCoord)
     return result
-
-
-# In[809]:
-
 
 # clean up all the date fields
 for dateCol in ['dateEntered','dateIdentified','eventDate']:
@@ -197,6 +175,9 @@ dfS['stateProvince'] = dfS['stateProvince'].apply(expandStateName)
 # clean up the county field
 dfS['county'] = dfS['county'].str.title()
 
+# clean the preperations column
+dfS['preparations'] = dfS['preparations'].str.replace('\. ','. | ')
+
 # generate the lifeStage column
 dfS['lifeStage'] = dfS.apply(gen_lifeStage, axis=1)
 
@@ -209,17 +190,7 @@ dfS[['scientificName','scientificNameAuthorship']] = dfS.apply(lambda row: pd.Se
 # generate the gps coords & preserve the verbatim as best as possible.
 dfS[['decimalLatitude', 'decimalLongitude', 'verbatimCoordinates']] = dfS.apply(lambda row: pd.Series(gen_GPS(row)), axis=1)
 
-
-# In[810]:
-
-
 colList = list(colMapper.values()) + ['lifeStage','decimalLatitude', 'decimalLongitude', 'verbatimCoordinates'] # select desired columns
 dfS = dfS.loc[:,colList].copy() # reduce the Dataframe to that with Symbiota fields
-print(dfS)
-
-
-# In[812]:
-
-
-dfS.to_csv('output.csv', encoding = 'utf-8')
+dfS.to_csv('output.csv', encoding = 'utf-8', index = False) # save the results to a csv
 
